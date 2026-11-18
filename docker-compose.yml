@@ -1,0 +1,260 @@
+# streamlab Phase 1 platform. Single node, dev only.
+# Host ports: Kafka 9092, Schema Registry 8081, Flink UI 8082, PostgreSQL 5432,
+#             MinIO 9000/9001, Grafana 3000, Kafka UI 8080 (profile "ui").
+name: streamlab
+
+x-flink-build: &flink-build
+  context: ./flink
+  args:
+    # Flink is held at 2.2.1, not the newest 2.3.0: the JDBC connector has no 2.3 build.
+    # See docs/KNOWN-UNKNOWNS.md K-14.
+    FLINK_VERSION: ${FLINK_VERSION:-2.2.1}
+    FLINK_KAFKA_CONNECTOR_VERSION: ${FLINK_KAFKA_CONNECTOR_VERSION:-5.0.0-2.2}
+    FLINK_JDBC_CONNECTOR_VERSION: ${FLINK_JDBC_CONNECTOR_VERSION:-4.1.0-2.2}
+    POSTGRES_JDBC_VERSION: ${POSTGRES_JDBC_VERSION:-42.7.7}
+
+# Flink 2.0 removed state.backend.type and renamed it: the key is now state.backend.
+# Flink 2.x also only reads config.yaml; there is no flink-conf.yaml any more.
+x-flink-properties: &flink-properties |
+  jobmanager.rpc.address: flink-jobmanager
+  rest.address: flink-jobmanager
+  jobmanager.memory.process.size: 1024m
+  taskmanager.memory.process.size: 1728m
+  taskmanager.numberOfTaskSlots: 2
+  parallelism.default: 2
+  state.backend: hashmap
+  state.checkpoints.dir: s3://flink/checkpoints
+  state.savepoints.dir: s3://flink/savepoints
+  s3.endpoint: http://minio:9000
+  s3.path.style.access: true
+  s3.access-key: ${MINIO_ROOT_USER:-streamlab}
+  s3.secret-key: ${MINIO_ROOT_PASSWORD:-streamlab_dev_secret}
+
+services:
+  kafka:
+    image: ${KAFKA_IMAGE:-apache/kafka:4.4.0}
+    hostname: kafka
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: INTERNAL://:19092,EXTERNAL://:9092,CONTROLLER://:9093
+      # INTERNAL is for other containers, EXTERNAL for clients on the Mac host.
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:19092,EXTERNAL://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      # Kafka 4.x KRaft: a dynamic quorum sets controller.quorum.bootstrap.servers and must
+      # NOT set controller.quorum.voters (which 4.0 deprecated). Keeping VOTERS would format
+      # a static quorum and the broker would refuse to start against a dynamic one.
+      KAFKA_CONTROLLER_QUORUM_BOOTSTRAP_SERVERS: kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_HEAP_OPTS: -Xms256m -Xmx512m
+      CLUSTER_ID: 5L6g3nShT-eMCtK--X86sw
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server kafka:19092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+    mem_limit: 768m
+
+  kafka-init:
+    image: ${KAFKA_IMAGE:-apache/kafka:4.4.0}
+    depends_on:
+      kafka:
+        condition: service_healthy
+    restart: "no"
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -euo pipefail
+        T=/opt/kafka/bin/kafka-topics.sh
+        B="--bootstrap-server kafka:19092 --create --if-not-exists"
+        $$T $$B --topic telemetry.raw.v1   --partitions 3 --replication-factor 1 --config retention.ms=604800000
+        $$T $$B --topic telemetry.clean.v1 --partitions 3 --replication-factor 1 --config retention.ms=604800000
+        $$T $$B --topic telemetry.dlq.v1   --partitions 1 --replication-factor 1 --config retention.ms=2592000000
+        $$T --bootstrap-server kafka:19092 --list
+    mem_limit: 512m
+
+  schema-registry:
+    image: ${SCHEMA_REGISTRY_IMAGE:-confluentinc/cp-schema-registry:7.9.11}
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8081:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka:19092
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+      SCHEMA_REGISTRY_HEAP_OPTS: -Xms128m -Xmx256m
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8081/subjects >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    mem_limit: 512m
+
+  postgres:
+    image: ${POSTGRES_IMAGE:-postgres:17.12}
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-streamlab}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-streamlab_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-streamlab}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-streamlab} -d ${POSTGRES_DB:-streamlab}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    mem_limit: 384m
+
+  minio:
+    image: ${MINIO_IMAGE:-quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z}
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-streamlab}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-streamlab_dev_secret}
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "mc ready local || curl -fs http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    mem_limit: 384m
+
+  minio-init:
+    image: ${MC_IMAGE:-quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z}
+    depends_on:
+      minio:
+        condition: service_healthy
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
+        mc mb --ignore-existing local/flink local/raw-archive
+        mc ls local
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-streamlab}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-streamlab_dev_secret}
+    mem_limit: 128m
+
+  flink-jobmanager:
+    build: *flink-build
+    image: streamlab-flink:local
+    command: jobmanager
+    ports:
+      - "8082:8081"
+    environment:
+      FLINK_PROPERTIES: *flink-properties
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+      kafka-init:
+        condition: service_completed_successfully
+      schema-registry:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/8081'"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    mem_limit: 1536m
+
+  flink-taskmanager:
+    build: *flink-build
+    image: streamlab-flink:local
+    command: taskmanager
+    environment:
+      FLINK_PROPERTIES: *flink-properties
+    depends_on:
+      flink-jobmanager:
+        condition: service_healthy
+    mem_limit: 2g
+
+  # One-shot job submitters: run the SQL client against the session cluster, then exit.
+  flink-job-clean:
+    image: streamlab-flink:local
+    command: bin/sql-client.sh -f /opt/flink/sql/10_job_clean.sql
+    volumes:
+      - ./flink/sql:/opt/flink/sql:ro
+      - ./flink/client-conf/config.yaml:/opt/flink/conf/config.yaml:ro
+    depends_on:
+      flink-taskmanager:
+        condition: service_started
+    restart: "no"
+    mem_limit: 768m
+
+  flink-job-agg:
+    image: streamlab-flink:local
+    command: bin/sql-client.sh -f /opt/flink/sql/20_job_agg_1m.sql
+    volumes:
+      - ./flink/sql:/opt/flink/sql:ro
+      - ./flink/client-conf/config.yaml:/opt/flink/conf/config.yaml:ro
+    depends_on:
+      flink-taskmanager:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    mem_limit: 768m
+
+  grafana:
+    image: ${GRAFANA_IMAGE:-grafana/grafana:13.3.1}
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      POSTGRES_USER: ${POSTGRES_USER:-streamlab}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-streamlab_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-streamlab}
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    mem_limit: 384m
+
+  kafka-ui:
+    image: ${KAFKA_UI_IMAGE:-ghcr.io/kafbat/kafka-ui:latest}
+    profiles: ["ui"]
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:19092
+      KAFKA_CLUSTERS_0_SCHEMAREGISTRY: http://schema-registry:8081
+    depends_on:
+      kafka:
+        condition: service_healthy
+    mem_limit: 512m
+
+volumes:
+  kafka-data:
+  pg-data:
+  minio-data:
