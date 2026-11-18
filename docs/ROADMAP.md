@@ -8,9 +8,10 @@ for real, not just unit tests.
 - [x] **T-00 Bring-up.** `make up` brings every service to healthy/completed on arm64.
   Accept: `docker compose ps` clean; both Flink jobs RUNNING in http://localhost:8082.
   Start with `docs/KNOWN-UNKNOWNS.md`.
-- [ ] **T-01 End-to-end proof.** `make smoke` prints OK (database matches ground truth) with
+- [x] **T-01 End-to-end proof.** `make smoke` prints OK (database matches ground truth) with
   default parameters, then with `--dup 0.2 --ooo 0.3`. Fix whatever breaks; record every
-  fix in KNOWN-UNKNOWNS.
+  fix in KNOWN-UNKNOWNS. (Done 2026-11-18; fixes K-21a/K-21b -- smoke now uses realtime
+  mode and a fresh seed, and clears state between runs.)
 - [ ] **T-02 Real sensor replay.** Adapt `src/streamlab/replay.py` to the real hw_monitor.py
   output, using a sanitised sample. Accept: replaying twice yields the same rows in `agg_1m`.
 - [ ] **T-03 Dashboard check.** Grafana "streamlab overview" shows data after `make smoke`;

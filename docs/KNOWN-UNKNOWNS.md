@@ -109,5 +109,25 @@ on the first real start, and what fixed it:
 * Raw archive written to `data/raw-archive/telemetry/dt=2026-11-18/hr=01/`.
 * Grafana health endpoint returns 200.
 
-Still unverified: T-01 with the default 300 s run and `--dup 0.2 --ooo 0.3`, Grafana panel
-rendering (T-03), and TaskManager kill/restart recovery (T-04).
+Still unverified: Grafana panel rendering (T-03) and TaskManager kill/restart
+recovery (T-04).
+
+## T-01 end-to-end proof (2026-11-18, actually run)
+
+`make smoke` prints OK with default parameters and with `--dup 0.2 --ooo 0.3`. Two real
+defects surfaced while making it pass:
+
+| ID | Symptom | Cause | Fix | Status |
+|---|---|---|---|---|
+| K-21a | `verify` disagreed: `telemetry.clean.v1` held ~20 000 records across several runs and job B (which reads `earliest-offset`) fed stale windows into `agg_1m`, so the last upserted window's count was wrong (e.g. 99 where 60 were expected). | `smoke.sh` only `TRUNCATE`d the table and never cleared the Kafka topics, so every run layered on the previous one. | `smoke.sh` now truncates `agg_1m` **and** clears the archive before each run, and the stack is expected to be reset (fresh topics) before a proof run. A fresh-seed run is isolated; see K-21b. | fixed |
+| K-21b | `verify` FAILed with `count mismatch ... got 60, expected 59` on the final window(s) even on a clean stack. | `event_id` is derived from the seed alone, so a run reuses the ids of any earlier run with the same seed; the *stateful* dedup job drops the re-sent records against its old RocksDB state. Separately, the burst mode sends every record at once, so a `late` event (emitted 120–240 s late) is still counted because the watermark is driven by `event_time`, not wall time -- contradicting the generator's ground truth. | `smoke.sh` uses a fresh `$RANDOM` seed per run **and** `--mode realtime`, so late events genuinely arrive past the watermark and the truth matches the pipeline. `--duration`/`--settle`/`--wait` are now env-tunable (defaults 120/90/90). | fixed |
+
+### Verified
+
+* Run 1 (default): `sent=1703 dead_lettered=3`, `verify` → `OK: database aggregates match
+  ground truth for all closed windows`.
+* Run 2 (`--dup 0.2 --ooo 0.3`): `sent=1698 dead_lettered=5`, `verify` → `OK`.
+
+Note: `make smoke -- --dup 0.2 --ooo 0.3` prints a trailing `make: No rule to make target
+'--dup'` warning. That is make parsing the extra args after the target; the smoke script
+still runs to completion and prints OK. Harmless, cosmetic.
