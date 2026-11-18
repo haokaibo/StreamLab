@@ -14,7 +14,7 @@ from streamlab.truth import read_truth, write_truth
 
 log = logging.getLogger("streamlab")
 
-DEFAULT_DSN = "postgresql://streamlab:streamlab_dev@localhost:5432/streamlab"
+DEFAULT_DSN = "postgresql://streamlab:streamlab_dev@127.0.0.1:55432/streamlab"
 
 
 def _cmd_check_schemas(_: argparse.Namespace) -> int:

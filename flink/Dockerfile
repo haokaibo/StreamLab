@@ -13,6 +13,10 @@ ARG FLINK_VERSION
 ARG FLINK_KAFKA_CONNECTOR_VERSION=5.0.0-2.2
 ARG FLINK_JDBC_CONNECTOR_VERSION=4.1.0-2.2
 ARG POSTGRES_JDBC_VERSION=42.7.7
+# The 4.x JDBC connector links against OpenLineage but does not bundle it; without these
+# jars job B dies with ClassNotFoundException: JdbcExtractor. Version matches the
+# openlineage.version property of flink-connector-jdbc-parent (K-19).
+ARG OPENLINEAGE_VERSION=1.32.0
 USER root
 WORKDIR /jars
 RUN set -eux; \
@@ -21,6 +25,8 @@ RUN set -eux; \
     curl -fsSLO "$M/org/apache/flink/flink-sql-avro-confluent-registry/${FLINK_VERSION}/flink-sql-avro-confluent-registry-${FLINK_VERSION}.jar"; \
     curl -fsSLO "$M/org/apache/flink/flink-connector-jdbc-core/${FLINK_JDBC_CONNECTOR_VERSION}/flink-connector-jdbc-core-${FLINK_JDBC_CONNECTOR_VERSION}.jar"; \
     curl -fsSLO "$M/org/apache/flink/flink-connector-jdbc-postgres/${FLINK_JDBC_CONNECTOR_VERSION}/flink-connector-jdbc-postgres-${FLINK_JDBC_CONNECTOR_VERSION}.jar"; \
+    curl -fsSLO "$M/io/openlineage/openlineage-java/${OPENLINEAGE_VERSION}/openlineage-java-${OPENLINEAGE_VERSION}.jar"; \
+    curl -fsSLO "$M/io/openlineage/openlineage-sql-java/${OPENLINEAGE_VERSION}/openlineage-sql-java-${OPENLINEAGE_VERSION}.jar"; \
     curl -fsSLO "$M/org/postgresql/postgresql/${POSTGRES_JDBC_VERSION}/postgresql-${POSTGRES_JDBC_VERSION}.jar"
 
 FROM flink:${FLINK_VERSION}-scala_2.12-java17

@@ -9,10 +9,15 @@ SET 'pipeline.name' = 'streamlab-agg-1m';
 SET 'execution.checkpointing.interval' = '10 s';
 SET 'table.local-time-zone' = 'UTC';
 SET 'table.exec.source.idle-timeout' = '10 s';
+-- NOTE: event_time is TIMESTAMP(3), not TIMESTAMP_LTZ. The avro-confluent format exposes
+-- no timestamp-mapping option, and its legacy mapping cannot convert TIMESTAMP_LTZ to
+-- an Avro schema ("Unsupported to derive Schema for type: TIMESTAMP_LTZ(3)"). With
+-- table.local-time-zone=UTC the column carries a UTC wall clock, which matches the
+-- schema's timestamp-millis. See docs/KNOWN-UNKNOWNS.md K-18.
 
 CREATE TABLE telemetry_clean (
   event_id   STRING NOT NULL,
-  event_time TIMESTAMP_LTZ(3) NOT NULL,
+  event_time TIMESTAMP(3) NOT NULL,
   host       STRING NOT NULL,
   source     STRING NOT NULL,
   metric     STRING NOT NULL,

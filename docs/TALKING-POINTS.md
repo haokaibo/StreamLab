@@ -31,7 +31,7 @@ compatible: `schemas/avro/evolution/` and `scripts/check_compat.py` prove it; th
 rejects breaking changes. Contrast with the batch world: here the failure is prevented at
 write time instead of discovered when a nightly job breaks.
 
-**How do you replay?** Raw JSON archive by hour on S3-compatible storage, or rewind Kafka
+**How do you replay?** Raw JSON archive by hour on local files, or rewind Kafka
 offsets; event ids are deterministic (UUIDv5) for replayed sensor data, so replays dedupe.
 
 **How do you know it is correct?** `streamlab verify` compares closed windows with the

@@ -1,7 +1,7 @@
 # streamlab
 
 A single-machine practice platform for production streaming concerns: **Kafka (Avro +
-Schema Registry) → Flink SQL → PostgreSQL / S3-compatible storage → Grafana**, with a
+Schema Registry) → Flink SQL → PostgreSQL / local file archive → Grafana**, with a
 deterministic data generator that doubles as a correctness oracle.
 
 > Status: Phase 1 draft. Python code and static checks are unit-tested (`make test`).
@@ -14,7 +14,7 @@ deterministic data generator that doubles as a correctness oracle.
 * Deduplication by event id (at-least-once producers, effectively-once results).
 * Exactly-once Kafka sink (transactions + checkpoints) and idempotent PostgreSQL upserts.
 * Avro schemas in a registry with BACKWARD compatibility checks.
-* Replayable raw layer on S3-compatible storage; dead-letter topic for bad records.
+* Replayable raw layer on the local filesystem; dead-letter topic for bad records.
 * Ground-truth verification: `streamlab verify` proves the database matches what the
   generator knows it sent, duplicates and lateness included.
 
@@ -28,7 +28,7 @@ make smoke                 # generate messy data, wait, verify against ground tr
 ```
 
 UIs: Flink http://localhost:8082 · Grafana http://localhost:3000 (admin/admin) ·
-MinIO http://localhost:9001 · Kafka UI `make ui` → http://localhost:8080.
+Kafka UI `make ui` → http://localhost:8080.
 
 Without Docker: `make test` runs the unit tests (generator, schemas, validation, replay,
 verification logic, and static consistency checks of the infrastructure files).

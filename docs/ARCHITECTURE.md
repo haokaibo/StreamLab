@@ -8,7 +8,7 @@
                                                                      │
                                     Flink job A (10_job_clean.sql)   ▼
                                     dedup by event_id  ──────────► telemetry.clean.v1 (3p)
-                                    raw copy ───────────────────► s3://raw-archive (JSON)
+                                    raw copy ───────────────────► ./data/raw-archive (JSON on a bind mount)
                                                                      │
                                     Flink job B (20_job_agg_1m.sql)  ▼
                                     1-min event-time tumbling windows
@@ -53,18 +53,20 @@ in `agg_1m` with the expected counts and averages.
 | kafka-init (one-shot) | 512 MB |
 | schema-registry | 512 MB |
 | postgres | 384 MB |
-| minio | 384 MB |
-| minio-init (one-shot) | 128 MB |
 | flink-jobmanager | 1.5 GB |
 | flink-taskmanager | 2 GB |
 | flink-job-* (one-shot x2) | 768 MB each |
 | grafana | 384 MB |
 | kafka-ui (profile `ui`) | 512 MB |
 
-Steady state is about 6 GB; limits of every service sum to below 10 GB (checked by
+Steady state is about 5.5 GB; limits of every service sum to below 10 GB (checked by
 `tests/test_compose.py`). A local Kubernetes cluster in Phase 2 needs its own budget.
 
 ## Ports
 
-Kafka 9092 · Schema Registry 8081 · Flink UI 8082 · PostgreSQL 5432 · MinIO 9000/9001 ·
+Kafka 9092 · Schema Registry 8081 · Flink UI 8082 · PostgreSQL **55432** ·
 Grafana 3000 · Kafka UI 8080 (profile `ui`).
+
+PostgreSQL is published on 55432 rather than 5432 because a locally installed Postgres
+commonly owns 5432, and the clash silently points `streamlab verify` at the wrong server.
+Inside the container the port is still 5432.

@@ -9,7 +9,7 @@ Status legend: `unverified` / `verified` / `fixed`.
 | ID | Area | Risk | Symptom | Candidate fix | Status |
 |---|---|---|---|---|---|
 | K-01 | Images | Tags may not exist or lack linux/arm64 (`apache/kafka:3.9.0`, `cp-schema-registry:7.7.1`, Grafana, kafka-ui). | `manifest unknown` or `no matching manifest for linux/arm64` on pull. | Check the registry, bump the tag in `.env.example`. | unverified |
-| K-02 | MinIO | Upstream stopped distributing community images in 2025; the pinned `quay.io/minio/minio` and `mc` tags may be gone. | Pull fails for `minio` or `minio-init`. | Use another pinned release or an S3-compatible alternative (SeaweedFS, Garage); keep the `s3.endpoint` / path-style settings. | unverified |
+| K-02 | MinIO | Upstream stopped distributing community images in 2025; the pinned `quay.io/minio/minio` and `mc` tags may be gone. | Pull fails for `minio` or `minio-init`. | **Resolved by removing the S3 layer entirely** (ADR-009): archives and checkpoints now use a bind mount under `data/`. No AWS account is available for this project. | fixed |
 | K-03 | Kafka | Data volume permissions for `/var/lib/kafka/data` with the `apache/kafka` image's non-root user. | Broker exits with a permission error. | Remove `KAFKA_LOG_DIRS` and the volume mount (data in the container), or chown via an init step. | unverified |
 | K-04 | Flink image | Tag `flink:1.20.1-scala_2.12-java17`, or connector jar versions, may not exist (Maven Central 404 during build). | `docker compose build` fails in the `fetch` stage. | Adjust `FLINK_*` versions in `.env.example`; connector minor must match Flink minor. A newer Flink line may need newer connectors. | unverified |
 | K-05 | Flink SQL client | `bin/sql-client.sh` may not pick up `flink/client-conf/config.yaml` (file name differs by Flink version), so it targets localhost:8081. | `Could not connect to Flink cluster` / connection refused in `flink-job-*` logs. | Rename to `flink-conf.yaml`, or pass `-Drest.address=flink-jobmanager`, or use the SQL Gateway. | unverified |
@@ -81,5 +81,33 @@ could not start Docker.
 |---|---|---|---|---|---|
 | K-14 | Flink | Flink 2.3.0 exists but `flink-connector-jdbc` has no `-2.3` build (verified 404 on Maven Central). | Job B cannot plan: no JDBC sink implementation. | Stay on 2.2.1; bump Flink and both connectors together once a 2.3 connector ships. | known limit |
 | K-15 | Kafka | Kafka 4.x images may default `log.dirs` and reject the non-root user on the mounted volume (extends K-03). | Broker exits with a permission error. | Same as K-03: drop `KAFKA_LOG_DIRS`/volume, or chown in an init step. | unverified |
-| K-16 | MinIO | The pinned community image may no longer be pullable (K-02 still stands, unchanged by this upgrade). | Pull fails for `minio`/`minio-init`. | Switch to another S3-compatible store, keep path-style settings. | unverified |
+| K-16 | MinIO | The pinned community image may no longer be pullable (K-02 still stands, unchanged by this upgrade). | Pull fails for `minio`/`minio-init`. | Superseded: both services were removed, see ADR-009. | fixed |
 
+
+## T-00 bring-up results (2026-11-18, actually run)
+
+`make up` now brings every service to healthy/completed and both jobs to RUNNING. What broke
+on the first real start, and what fixed it:
+
+| ID | Symptom | Cause | Fix | Status |
+|---|---|---|---|---|
+| K-02 | `quay.io/minio/minio` returned **401 UNAUTHORIZED** on every tag; Docker Hub returns 404. | MinIO retired its community images. | Dropped the object store entirely; archives and checkpoints use `file://` on a bind mount (ADR-009). | fixed |
+| K-17 | Kafka exited 1: `Because controller.quorum.voters is not set on this controller, you must specify one of --standalone, --initial-controllers, --no-initial-controllers`. | The 4.x upgrade had replaced `voters` with `bootstrap.servers`, but the image wrapper only formats a *static* quorum. | Restored `KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093`; the image's own comment says it keeps static voters on purpose. | fixed |
+| K-18 | Both jobs failed: `UnsupportedOperationException: Unsupported to derive Schema for type: TIMESTAMP_LTZ(3)`. | `avro-confluent` uses Avro's legacy timestamp mapping by default, which cannot map `TIMESTAMP_LTZ`. The `avro.timestamp_mapping.legacy` option is not on the confluent format's option whitelist. | Declared `event_time` as `TIMESTAMP(3)`; with `table.local-time-zone=UTC` it carries a UTC wall clock matching the schema's `timestamp-millis`. | fixed |
+| K-19 | Job B failed: `ClassNotFoundException: io.openlineage.client.utils.jdbc.JdbcExtractor`. | The 4.x JDBC connector links against OpenLineage but does not bundle it. | `flink/Dockerfile` now also fetches `openlineage-java` and `openlineage-sql-java` **1.32.0**, the version in `flink-connector-jdbc-parent`. | fixed |
+| K-20 | `make verify` failed with `role "streamlab" does not exist` even though the role exists. | A local Postgres already listened on host `127.0.0.1:5432`, so the CLI reached the wrong server. | Moved the published port to **55432** (`55432:5432`) and pointed `DEFAULT_DSN` at it. | fixed |
+
+### Verified end to end
+
+* `docker compose ps`: flink-jobmanager, kafka, schema-registry, postgres healthy; one-shot
+  job containers exit 0.
+* `http://localhost:8082/jobs/overview`: `streamlab-clean` RUNNING, `streamlab-agg-1m` RUNNING.
+* Checkpoints: 12 completed / 0 failed on both jobs.
+* `streamlab generate --duration 60 --settle 40`: sent 811, dead-lettered 1, 0 delivery errors.
+* `streamlab verify`: `OK: database aggregates match ground truth for all closed windows`.
+* `agg_1m` holds 8 rows (2 hosts x 4 metrics) with `sample_count = 42` each.
+* Raw archive written to `data/raw-archive/telemetry/dt=2026-11-18/hr=01/`.
+* Grafana health endpoint returns 200.
+
+Still unverified: T-01 with the default 300 s run and `--dup 0.2 --ooo 0.3`, Grafana panel
+rendering (T-03), and TaskManager kill/restart recovery (T-04).

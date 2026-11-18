@@ -5,7 +5,7 @@ for real, not just unit tests.
 
 ## Phase 1: platform and pipeline (current)
 
-- [ ] **T-00 Bring-up.** `make up` brings every service to healthy/completed on arm64.
+- [x] **T-00 Bring-up.** `make up` brings every service to healthy/completed on arm64.
   Accept: `docker compose ps` clean; both Flink jobs RUNNING in http://localhost:8082.
   Start with `docs/KNOWN-UNKNOWNS.md`.
 - [ ] **T-01 End-to-end proof.** `make smoke` prints OK (database matches ground truth) with
@@ -37,7 +37,7 @@ for real, not just unit tests.
 ## Phase 2: platform
 
 - [ ] **T-11 Kubernetes.** Run on a local cluster with Helm (Kafka, Flink Kubernetes
-  Operator, PostgreSQL, MinIO). Add a Compose-vs-K8s comparison note.
+  Operator, PostgreSQL, an object store). Add a Compose-vs-K8s comparison note.
 - [ ] **T-12 Observability.** Prometheus + Grafana for Kafka lag and Flink metrics; alert
   rules.
 - [ ] **T-13 CI e2e.** Make the manual `e2e` GitHub Actions job reliable.
