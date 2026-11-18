@@ -1,0 +1,4 @@
+{"ts": 1767225600, "host": "red-one", "readings": {"gpu_junction_c": 71.0, "gpu_vram_c": 68.0, "gpu_power_w": 182.0}}
+{"ts": 1767225601, "host": "red-one", "readings": {"gpu_junction_c": 71.5, "gpu_vram_c": 68.5, "gpu_power_w": 190.0}}
+{"ts": 1767225602, "host": "red-one", "readings": {"gpu_junction_c": 72.0, "gpu_vram_c": 69.0, "gpu_power_w": 201.0}}
+{"ts": 1767225603, "host": "red-one", "metric": "cpu.package_temp_c", "value": 54.5, "unit": "C"}
