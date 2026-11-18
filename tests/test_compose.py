@@ -31,8 +31,6 @@ def test_required_services_exist():
         "kafka-init",
         "schema-registry",
         "postgres",
-        "minio",
-        "minio-init",
         "flink-jobmanager",
         "flink-taskmanager",
         "flink-job-clean",
@@ -40,6 +38,16 @@ def test_required_services_exist():
         "grafana",
     ):
         assert name in services, name
+
+
+def test_no_object_store_service_is_required():
+    """Archives and checkpoints use a local bind mount, so no S3 service may be required."""
+    services = _compose()["services"]
+    for name in ("minio", "minio-init"):
+        assert name not in services, f"{name} should be gone (ADR-009)"
+    for svc in services.values():
+        for dep in svc.get("depends_on", {}):
+            assert not dep.startswith("minio"), dep
 
 
 def test_host_ports_are_unique():
@@ -111,9 +119,17 @@ def test_dev_credentials_match_env_example():
     assert f"'username' = '{env['POSTGRES_USER']}'" in agg_sql
     assert f"'password' = '{env['POSTGRES_PASSWORD']}'" in agg_sql
     assert f"jdbc:postgresql://postgres:5432/{env['POSTGRES_DB']}" in agg_sql
-    client = yaml.safe_load((ROOT / "flink/client-conf/config.yaml").read_text())
-    assert client["s3.access-key"] == env["MINIO_ROOT_USER"]
-    assert client["s3.secret-key"] == env["MINIO_ROOT_PASSWORD"]
+
+
+def test_flink_uses_local_paths_not_object_storage():
+    """No AWS account here: checkpoints and the archive live on a bind mount (ADR-009)."""
+    clean_sql = (ROOT / "flink/sql/10_job_clean.sql").read_text()
+    assert "'path' = 'file:///opt/streamlab/data/raw-archive/telemetry/'" in clean_sql
+    assert "s3://" not in clean_sql
+    props = _compose()["services"]["flink-jobmanager"]["environment"]["FLINK_PROPERTIES"]
+    assert "file:///opt/streamlab/data/checkpoints" in props
+    assert "file:///opt/streamlab/data/savepoints" in props
+    assert "s3." not in props
 
 
 def test_kafka_transaction_timeout_is_below_broker_max():
@@ -140,11 +156,15 @@ def test_dashboard_is_valid_json_and_uses_provisioned_datasource():
     assert all(p["datasource"]["uid"] == uid for p in dash["panels"])
 
 
-def test_kafka_uses_the_kraft_4x_quorum_key():
-    """Kafka 4.0 deprecated controller.quorum.voters; a dynamic quorum must not set it."""
+def test_kafka_uses_the_kraft_quorum_key_the_image_understands():
+    """The apache/kafka image formats a static quorum and needs controller.quorum.voters.
+
+    Setting controller.quorum.bootstrap.servers instead makes the wrapper abort with
+    "you must specify --standalone / --initial-controllers". See K-17.
+    """
     env = _compose()["services"]["kafka"]["environment"]
-    assert "KAFKA_CONTROLLER_QUORUM_VOTERS" not in env
-    assert env["KAFKA_CONTROLLER_QUORUM_BOOTSTRAP_SERVERS"] == "kafka:9093"
+    assert env["KAFKA_CONTROLLER_QUORUM_VOTERS"] == "1@kafka:9093"
+    assert "KAFKA_CONTROLLER_QUORUM_BOOTSTRAP_SERVERS" not in env
     assert env["KAFKA_PROCESS_ROLES"] == "broker,controller"
 
 

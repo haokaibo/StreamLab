@@ -1,9 +1,8 @@
 # Used only by the one-shot SQL client containers (mounted over /opt/flink/conf/config.yaml)
 # so they know where the session cluster is. Dev credentials, same as .env.example.
+#
+# There is no object store in this platform: archives and checkpoints use plain
+# local filesystem paths under the bind mount at /opt/streamlab/data (see ADR-009).
 jobmanager.rpc.address: flink-jobmanager
 rest.address: flink-jobmanager
 rest.port: 8081
-s3.endpoint: http://minio:9000
-s3.path.style.access: true
-s3.access-key: streamlab
-s3.secret-key: streamlab_dev_secret

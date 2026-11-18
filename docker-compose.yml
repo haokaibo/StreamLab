@@ -1,5 +1,5 @@
 # streamlab Phase 1 platform. Single node, dev only.
-# Host ports: Kafka 9092, Schema Registry 8081, Flink UI 8082, PostgreSQL 5432,
+# Host ports: Kafka 9092, Schema Registry 8081, Flink UI 8082, PostgreSQL 55432,
 #             MinIO 9000/9001, Grafana 3000, Kafka UI 8080 (profile "ui").
 name: streamlab
 
@@ -15,6 +15,9 @@ x-flink-build: &flink-build
 
 # Flink 2.0 removed state.backend.type and renamed it: the key is now state.backend.
 # Flink 2.x also only reads config.yaml; there is no flink-conf.yaml any more.
+#
+# No object store: archives and checkpoints go to a bind mount under the repo instead of S3.
+# See ADR-009 in docs/DECISIONS.md.
 x-flink-properties: &flink-properties |
   jobmanager.rpc.address: flink-jobmanager
   rest.address: flink-jobmanager
@@ -23,12 +26,8 @@ x-flink-properties: &flink-properties |
   taskmanager.numberOfTaskSlots: 2
   parallelism.default: 2
   state.backend: hashmap
-  state.checkpoints.dir: s3://flink/checkpoints
-  state.savepoints.dir: s3://flink/savepoints
-  s3.endpoint: http://minio:9000
-  s3.path.style.access: true
-  s3.access-key: ${MINIO_ROOT_USER:-streamlab}
-  s3.secret-key: ${MINIO_ROOT_PASSWORD:-streamlab_dev_secret}
+  state.checkpoints.dir: file:///opt/streamlab/data/checkpoints
+  state.savepoints.dir: file:///opt/streamlab/data/savepoints
 
 services:
   kafka:
@@ -45,10 +44,12 @@ services:
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      # Kafka 4.x KRaft: a dynamic quorum sets controller.quorum.bootstrap.servers and must
-      # NOT set controller.quorum.voters (which 4.0 deprecated). Keeping VOTERS would format
-      # a static quorum and the broker would refuse to start against a dynamic one.
-      KAFKA_CONTROLLER_QUORUM_BOOTSTRAP_SERVERS: kafka:9093
+      # Kafka 4.x KRaft. The official apache/kafka image still formats a *static* quorum
+      # using controller.quorum.voters -- its wrapper says so explicitly "to maximize
+      # compatibility". Dropping voters in favour of controller.quorum.bootstrap.servers
+      # makes the image abort with "you must specify --standalone / --initial-controllers",
+      # so the single-node static voter below is the supported configuration (K-17).
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
@@ -108,7 +109,9 @@ services:
   postgres:
     image: ${POSTGRES_IMAGE:-postgres:17.12}
     ports:
-      - "5432:5432"
+      # Host port 55432: a local Postgres often owns 5432, and the clash silently
+      # routes `make verify` to the wrong server. Container-internal port stays 5432.
+      - "55432:5432"
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-streamlab}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-streamlab_dev}
@@ -123,43 +126,6 @@ services:
       retries: 12
     mem_limit: 384m
 
-  minio:
-    image: ${MINIO_IMAGE:-quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z}
-    command: server /data --console-address ":9001"
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-streamlab}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-streamlab_dev_secret}
-    volumes:
-      - minio-data:/data
-    healthcheck:
-      test: ["CMD-SHELL", "mc ready local || curl -fs http://localhost:9000/minio/health/live"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-      start_period: 10s
-    mem_limit: 384m
-
-  minio-init:
-    image: ${MC_IMAGE:-quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z}
-    depends_on:
-      minio:
-        condition: service_healthy
-    restart: "no"
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        set -eu
-        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
-        mc mb --ignore-existing local/flink local/raw-archive
-        mc ls local
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-streamlab}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-streamlab_dev_secret}
-    mem_limit: 128m
-
   flink-jobmanager:
     build: *flink-build
     image: streamlab-flink:local
@@ -168,9 +134,10 @@ services:
       - "8082:8081"
     environment:
       FLINK_PROPERTIES: *flink-properties
+    volumes:
+      # Archives, savepoints and checkpoints land here on the host (ADR-009).
+      - ./data:/opt/streamlab/data
     depends_on:
-      minio-init:
-        condition: service_completed_successfully
       kafka-init:
         condition: service_completed_successfully
       schema-registry:
@@ -189,6 +156,8 @@ services:
     command: taskmanager
     environment:
       FLINK_PROPERTIES: *flink-properties
+    volumes:
+      - ./data:/opt/streamlab/data
     depends_on:
       flink-jobmanager:
         condition: service_healthy
@@ -201,6 +170,7 @@ services:
     volumes:
       - ./flink/sql:/opt/flink/sql:ro
       - ./flink/client-conf/config.yaml:/opt/flink/conf/config.yaml:ro
+      - ./data:/opt/streamlab/data
     depends_on:
       flink-taskmanager:
         condition: service_started
@@ -213,6 +183,7 @@ services:
     volumes:
       - ./flink/sql:/opt/flink/sql:ro
       - ./flink/client-conf/config.yaml:/opt/flink/conf/config.yaml:ro
+      - ./data:/opt/streamlab/data
     depends_on:
       flink-taskmanager:
         condition: service_started
@@ -257,4 +228,3 @@ services:
 volumes:
   kafka-data:
   pg-data:
-  minio-data:

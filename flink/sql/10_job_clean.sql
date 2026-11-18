@@ -1,6 +1,6 @@
 -- Job A: telemetry.raw.v1 -> deduplicate by event_id -> telemetry.clean.v1
 --        and, in the same job, archive every raw event (duplicates included) as JSON on
---        S3-compatible storage so any downstream job can be replayed from files.
+--        the local filesystem so any downstream job can be replayed from files.
 --
 -- Guarantees: Kafka sink is exactly-once (transactions committed on checkpoint); dedup
 -- keeps the first arrival per event_id for as long as the state TTL below.
@@ -10,10 +10,15 @@ SET 'execution.checkpointing.interval' = '10 s';
 SET 'table.local-time-zone' = 'UTC';
 SET 'table.exec.state.ttl' = '2 h';
 SET 'table.exec.source.idle-timeout' = '10 s';
+-- NOTE: event_time is TIMESTAMP(3), not TIMESTAMP_LTZ. The avro-confluent format exposes
+-- no timestamp-mapping option, and its legacy mapping cannot convert TIMESTAMP_LTZ to
+-- an Avro schema ("Unsupported to derive Schema for type: TIMESTAMP_LTZ(3)"). With
+-- table.local-time-zone=UTC the column carries a UTC wall clock, which matches the
+-- schema's timestamp-millis. See docs/KNOWN-UNKNOWNS.md K-18.
 
 CREATE TABLE telemetry_raw (
   event_id   STRING NOT NULL,
-  event_time TIMESTAMP_LTZ(3) NOT NULL,
+  event_time TIMESTAMP(3) NOT NULL,
   host       STRING NOT NULL,
   source     STRING NOT NULL,
   metric     STRING NOT NULL,
@@ -33,7 +38,7 @@ CREATE TABLE telemetry_raw (
 
 CREATE TABLE telemetry_clean_sink (
   event_id   STRING NOT NULL,
-  event_time TIMESTAMP_LTZ(3) NOT NULL,
+  event_time TIMESTAMP(3) NOT NULL,
   host       STRING NOT NULL,
   source     STRING NOT NULL,
   metric     STRING NOT NULL,
@@ -55,7 +60,7 @@ CREATE TABLE telemetry_clean_sink (
 
 CREATE TABLE raw_archive (
   event_id   STRING,
-  event_time TIMESTAMP_LTZ(3),
+  event_time TIMESTAMP(3),
   host       STRING,
   source     STRING,
   metric     STRING,
@@ -66,7 +71,7 @@ CREATE TABLE raw_archive (
   hr         STRING
 ) PARTITIONED BY (dt, hr) WITH (
   'connector' = 'filesystem',
-  'path' = 's3://raw-archive/telemetry/',
+  'path' = 'file:///opt/streamlab/data/raw-archive/telemetry/',
   'format' = 'json',
   'json.timestamp-format.standard' = 'ISO-8601',
   'sink.rolling-policy.rollover-interval' = '1 min',

@@ -51,3 +51,24 @@ Consequences: the platform is one Flink minor behind latest, and Flink 1.20 -> 2
 jump that carried breaking config renames (`state.backend.type` -> `state.backend`) and a
 split JDBC connector. Consequence for later: connector compatibility, not release date,
 drives the Flink pin; record the 404 evidence in `docs/KNOWN-UNKNOWNS.md` K-14.
+
+## ADR-009: local filesystem instead of an object store
+
+Context: Phase 1 was written against S3-compatible storage (MinIO). By the time the stack was
+first started, MinIO had retired its community images -- Docker Hub returns 404 and
+`quay.io/minio/minio` returns 401 for every tag -- and there is no AWS account available for
+this project.
+
+Decision: drop the object-store layer. The raw archive and Flink's checkpoints and
+savepoints use plain `file://` paths on a bind mount at `./data`, and the `minio` and
+`minio-init` services are removed. `data/` is git-ignored.
+
+Consequences:
+
+* Two fewer services and about 512 MB of memory budget released.
+* No credential handling, no bucket bootstrap, no SigV4 signing to get wrong.
+* The archive is no longer reachable from another machine. Revisiting this (Garage,
+  SeaweedFS or a real bucket) is the same swap in one place: the `raw_archive` path and the
+  two `state.*.dir` properties.
+* `sink.rolling-policy` still applies, so the archive remains replayable as JSON lines
+  partitioned by `dt`/`hr`.
