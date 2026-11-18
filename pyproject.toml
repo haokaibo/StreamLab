@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "streamlab"
 version = "0.1.0"
-description = "Local event-streaming practice platform: Kafka + Avro + Flink SQL + PostgreSQL + S3-compatible storage."
+description = "Local event-streaming practice platform: Kafka + Avro + Flink SQL + PostgreSQL + local file archive."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
