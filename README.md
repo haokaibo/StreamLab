@@ -39,6 +39,10 @@ DURATION=300 SETTLE=90 WAIT=120 make smoke       # longer run
 make smoke -- --dup 0.2 --ooo 0.3                # heavier duplicate / out-of-order load
 ```
 
+When passing extra arguments, `make` also prints `No rule to make target '--dup'` after the
+run finishes. The smoke script itself completes and prints its verdict first; the message is
+make parsing the arguments that follow the target and is harmless.
+
 UIs and ports:
 
 | Service | URL |
