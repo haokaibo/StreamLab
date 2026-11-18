@@ -1,0 +1,182 @@
+{
+  "uid": "streamlab-overview",
+  "title": "streamlab overview",
+  "tags": [
+    "streamlab"
+  ],
+  "timezone": "utc",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "host",
+        "type": "query",
+        "datasource": {
+          "type": "postgres",
+          "uid": "streamlab-pg"
+        },
+        "refresh": 2,
+        "query": "SELECT DISTINCT host FROM agg_1m ORDER BY 1",
+        "includeAll": false,
+        "current": {}
+      },
+      {
+        "name": "metric",
+        "type": "query",
+        "datasource": {
+          "type": "postgres",
+          "uid": "streamlab-pg"
+        },
+        "refresh": 2,
+        "query": "SELECT DISTINCT metric FROM agg_1m ORDER BY 1",
+        "includeAll": true,
+        "multi": true,
+        "current": {}
+      },
+      {
+        "name": "gpu_metric",
+        "type": "constant",
+        "query": "gpu.junction_temp_c",
+        "hide": 2,
+        "current": {
+          "text": "gpu.junction_temp_c",
+          "value": "gpu.junction_temp_c"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Average per minute",
+      "datasource": {
+        "type": "postgres",
+        "uid": "streamlab-pg"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "streamlab-pg"
+          },
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT window_start AS time, metric AS metric, avg_value AS value\nFROM agg_1m\nWHERE $__timeFilter(window_start) AND host = '$host' AND metric IN ($metric)\nORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Samples per minute (dedup + late-data check)",
+      "datasource": {
+        "type": "postgres",
+        "uid": "streamlab-pg"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 9,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "streamlab-pg"
+          },
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT window_start AS time, host AS metric, SUM(sample_count) AS value\nFROM agg_1m\nWHERE $__timeFilter(window_start)\nGROUP BY 1, 2 ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "GPU junction min/max per minute",
+      "datasource": {
+        "type": "postgres",
+        "uid": "streamlab-pg"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 9,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "streamlab-pg"
+          },
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT window_start AS time, 'min' AS metric, min_value AS value FROM agg_1m\nWHERE $__timeFilter(window_start) AND host = '$host' AND metric = '$gpu_metric'\nUNION ALL\nSELECT window_start, 'max', max_value FROM agg_1m\nWHERE $__timeFilter(window_start) AND host = '$host' AND metric = '$gpu_metric'\nORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "table",
+      "title": "Latest windows",
+      "datasource": {
+        "type": "postgres",
+        "uid": "streamlab-pg"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 17,
+        "w": 24,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "streamlab-pg"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT window_start, host, metric, sample_count, round(avg_value::numeric, 2) AS avg_value,\n       min_value, max_value, inserted_at\nFROM agg_1m ORDER BY window_start DESC LIMIT 50"
+        }
+      ]
+    }
+  ]
+}

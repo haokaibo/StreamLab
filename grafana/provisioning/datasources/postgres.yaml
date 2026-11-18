@@ -1,0 +1,16 @@
+apiVersion: 1
+datasources:
+  - name: StreamlabPG
+    uid: streamlab-pg
+    type: postgres
+    access: proxy
+    url: postgres:5432
+    user: $POSTGRES_USER
+    isDefault: true
+    jsonData:
+      database: $POSTGRES_DB
+      sslmode: disable
+      postgresVersion: 1700
+      timescaledb: false
+    secureJsonData:
+      password: $POSTGRES_PASSWORD
