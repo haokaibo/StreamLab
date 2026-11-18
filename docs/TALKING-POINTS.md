@@ -37,6 +37,18 @@ offsets; event ids are deterministic (UUIDv5) for replayed sensor data, so repla
 **How do you know it is correct?** `streamlab verify` compares closed windows with the
 generator's ground truth, including expected drops.
 
+**Prove the checkpoint recovery, don't just claim it.** Ran it on 2026-11-18: started a
+120 s + 90 s realtime run, and 45 s in killed the only TaskManager with
+`docker compose kill flink-taskmanager` while `streamlab generate` was still producing.
+Both jobs immediately went `RESTARTING` (the jobs had no slots left to run in). Bringing the
+TaskManager back (`docker compose up -d flink-taskmanager`) returned both to `RUNNING`
+without resubmitting SQL. The checkpoint counters told the story: `95 completed / 4 failed /
+6 restored` — the 4 failures are the in-flight checkpoints interrupted by the kill, the 6
+restores are the recovery attempts. `streamlab verify --truth /tmp/truth-t04.jsonl` then
+printed `OK: database aggregates match ground truth for all closed windows`, so no record was
+lost or double-counted across the outage. That works because the Kafka sink is transactional
+and only commits on a completed checkpoint, and the JDBC sink upserts on the primary key.
+
 **What would you change at 100x scale?** Partition count and key design, RocksDB state backend
 with incremental checkpoints, a real object store, Kubernetes with the Flink operator, lag and
 checkpoint-duration alerting, compaction of small files.

@@ -24,7 +24,11 @@
         "refresh": 2,
         "query": "SELECT DISTINCT host FROM agg_1m ORDER BY 1",
         "includeAll": false,
-        "current": {}
+        "current": {
+          "selected": true,
+          "text": "g3",
+          "value": "g3"
+        }
       },
       {
         "name": "metric",
@@ -37,7 +41,15 @@
         "query": "SELECT DISTINCT metric FROM agg_1m ORDER BY 1",
         "includeAll": true,
         "multi": true,
-        "current": {}
+        "current": {
+          "selected": true,
+          "text": [
+            "$__all"
+          ],
+          "value": [
+            "$__all"
+          ]
+        }
       },
       {
         "name": "gpu_metric",

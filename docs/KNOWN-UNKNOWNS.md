@@ -109,8 +109,7 @@ on the first real start, and what fixed it:
 * Raw archive written to `data/raw-archive/telemetry/dt=2026-11-18/hr=01/`.
 * Grafana health endpoint returns 200.
 
-Still unverified: Grafana panel rendering (T-03) and TaskManager kill/restart
-recovery (T-04).
+
 
 ## T-01 end-to-end proof (2026-11-18, actually run)
 
@@ -131,3 +130,34 @@ defects surfaced while making it pass:
 Note: `make smoke -- --dup 0.2 --ooo 0.3` prints a trailing `make: No rule to make target
 '--dup'` warning. That is make parsing the extra args after the target; the smoke script
 still runs to completion and prints OK. Harmless, cosmetic.
+
+## T-03 dashboard and T-04 restart safety (2026-11-18, actually run)
+
+### T-03: panels showed no data
+
+The provisioned dashboard loaded, the datasource resolved and the SQL was valid, but two
+panels queried `host = ''` / `metric IN ()` because the `host` and `metric` template
+variables had an empty `current` value. With `host` selecting nothing and `metric` an empty
+multi-select, Grafana rendered "No data" even though `agg_1m` held rows.
+
+Fix: `grafana/dashboards/streamlab-overview.json` now sets `current` for both variables
+(`host` -> a concrete host, `metric` -> `$__all`). Verified by replaying each panel's SQL
+through `POST /api/ds/query`: panels 1-3 returned 200 with data, panel 4 returned 32 table
+rows. Grafana UI rendering was not screenshotted (the automation permissions were not
+granted), but the query layer is proven.
+
+### T-04: TaskManager killed mid-run
+
+Procedure and result: started a 120 s + 90 s `--mode realtime` run, and 45 s in ran
+`docker compose kill flink-taskmanager` (the only TaskManager) while the generator was still
+producing. Both jobs went `RESTARTING`. `docker compose up -d flink-taskmanager` brought them
+back to `RUNNING` without resubmitting the SQL. Checkpoint counters: **95 completed / 4
+failed / 6 restored** — the failures are the in-flight checkpoints cut by the kill. Then
+`streamlab verify --truth /tmp/truth-t04.jsonl` printed
+`OK: database aggregates match ground truth for all closed windows`, so nothing was lost or
+counted twice across the outage.
+
+Note for a future reset: after `TRUNCATE agg_1m` the agg job re-reads
+`telemetry.clean.v1` from `earliest-offset` and repopulates windows from earlier runs, so
+`agg_1m` can contain timestamps older than the current run. That is expected with the current
+setup; a clean proof run starts from fresh volumes.

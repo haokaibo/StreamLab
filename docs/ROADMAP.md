@@ -14,11 +14,14 @@ for real, not just unit tests.
   mode and a fresh seed, and clears state between runs.)
 - [ ] **T-02 Real sensor replay.** Adapt `src/streamlab/replay.py` to the real hw_monitor.py
   output, using a sanitised sample. Accept: replaying twice yields the same rows in `agg_1m`.
-- [ ] **T-03 Dashboard check.** Grafana "streamlab overview" shows data after `make smoke`;
-  fix queries if not.
-- [ ] **T-04 Restart safety.** Kill the TaskManager mid-run (`docker compose kill
+- [x] **T-03 Dashboard check.** Grafana "streamlab overview" shows data after `make smoke`;
+  fix queries if not. (Done 2026-11-18: the `host` and `metric` template variables had empty
+  `current` values, so panels rendered `host = ''` and `metric IN ()`; defaults are now set.
+  All four panels were confirmed to return rows through the datasource query API.)
+- [x] **T-04 Restart safety.** Kill the TaskManager mid-run (`docker compose kill
   flink-taskmanager`), restart it, and show `verify` still passes (checkpoint recovery).
-  Write the result in `docs/TALKING-POINTS.md`.
+  Write the result in `docs/TALKING-POINTS.md`. (Done 2026-11-18: jobs went RESTARTING, came
+  back RUNNING, `verify` printed OK; checkpoint counters showed 6 restores.)
 
 ## Phase 1.5: depth
 
