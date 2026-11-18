@@ -1,0 +1,56 @@
+{
+  "type": "record",
+  "name": "record",
+  "namespace": "org.apache.flink.avro.generated",
+  "doc": "One numeric measurement taken by a host agent. Delivery is at-least-once, so events may be duplicated, delayed or out of order. NOTE: the record name/namespace are deliberately Flink's defaults so the avro-confluent format can read it with a table-derived reader schema; see docs/DECISIONS.md ADR-004.",
+  "fields": [
+    {
+      "name": "event_id",
+      "type": "string",
+      "doc": "Unique per measurement and stable across producer retries and replays. This is the deduplication key."
+    },
+    {
+      "name": "event_time",
+      "type": { "type": "long", "logicalType": "timestamp-millis" },
+      "doc": "When the measurement was taken at the source, UTC. Drives event-time windows."
+    },
+    {
+      "name": "host",
+      "type": "string",
+      "doc": "Logical host name, e.g. red-one."
+    },
+    {
+      "name": "source",
+      "type": "string",
+      "doc": "Emitting agent, e.g. hw_monitor, synthetic."
+    },
+    {
+      "name": "metric",
+      "type": "string",
+      "doc": "Dotted metric name, e.g. gpu.junction_temp_c."
+    },
+    {
+      "name": "value",
+      "type": "double",
+      "doc": "Measured value. Must be finite."
+    },
+    {
+      "name": "unit",
+      "type": "string",
+      "default": "",
+      "doc": "Unit of value, e.g. C, W. Empty if unknown."
+    },
+    {
+      "name": "seq",
+      "type": "long",
+      "default": 0,
+      "doc": "Per (host, source, metric) counter, increasing. Lets us detect gaps and reordering."
+    },
+    {
+      "name": "labels",
+      "type": { "type": "map", "values": "string" },
+      "default": {},
+      "doc": "Free-form labels (e.g. device index). Not used by the Phase 1 Flink jobs."
+    }
+  ]
+}

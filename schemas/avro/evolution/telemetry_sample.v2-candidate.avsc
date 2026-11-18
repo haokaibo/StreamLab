@@ -1,0 +1,23 @@
+{
+  "type": "record",
+  "name": "record",
+  "namespace": "org.apache.flink.avro.generated",
+  "doc": "CANDIDATE v2: adds an optional quality flag. Backward compatible with v1 (new field has a default). Not registered by default; used by tests and scripts/check_compat.py.",
+  "fields": [
+    { "name": "event_id", "type": "string" },
+    { "name": "event_time", "type": { "type": "long", "logicalType": "timestamp-millis" } },
+    { "name": "host", "type": "string" },
+    { "name": "source", "type": "string" },
+    { "name": "metric", "type": "string" },
+    { "name": "value", "type": "double" },
+    { "name": "unit", "type": "string", "default": "" },
+    { "name": "seq", "type": "long", "default": 0 },
+    { "name": "labels", "type": { "type": "map", "values": "string" }, "default": {} },
+    {
+      "name": "quality",
+      "type": { "type": "enum", "name": "Quality", "symbols": ["OK", "SUSPECT", "ESTIMATED"], "default": "OK" },
+      "default": "OK",
+      "doc": "Data quality flag set by the agent."
+    }
+  ]
+}
